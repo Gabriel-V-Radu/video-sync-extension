@@ -2,7 +2,6 @@ let selectedTabs = [];
 let videoTabs = [];
 let currentMode = 'local'; // 'local' or 'remote'
 let selectedRemoteTab = null;
-let webrtcManager = null; // WebRTC manager instance (created in popup context where RTCPeerConnection is available)
 
 const KNOWN_VIDEO_HOSTS = ["youtube.com", "crunchyroll.com", "netflix.com"];
 
@@ -105,45 +104,6 @@ function renderTabList() {
   });
 }
 
-function createTabItem(tab, icon) {
-  const div = document.createElement("div");
-  div.className = "tab-item";
-  div.dataset.tabId = tab.id;
-
-  const checkbox = document.createElement("input");
-  checkbox.type = "checkbox";
-  checkbox.className = "tab-checkbox";
-  checkbox.id = `tab-${tab.id}`;
-
-  const iconSpan = document.createElement("span");
-  iconSpan.className = "tab-icon";
-  iconSpan.textContent = icon;
-
-  const titleSpan = document.createElement("span");
-  titleSpan.className = "tab-title";
-  titleSpan.textContent = tab.title;
-
-  const badgeSpan = document.createElement("span");
-  badgeSpan.className = "tab-badge";
-  badgeSpan.id = `badge-${tab.id}`;
-  badgeSpan.style.display = "none";
-
-  div.appendChild(checkbox);
-  div.appendChild(iconSpan);
-  div.appendChild(titleSpan);
-  div.appendChild(badgeSpan);
-
-  div.addEventListener("click", (e) => {
-    if (e.target !== checkbox) {
-      checkbox.click();
-    }
-  });
-
-  checkbox.addEventListener("change", () => toggleTab(tab.id));
-
-  return div;
-}
-
 function renderRemoteTabList() {
   const videoListRemote = document.getElementById("videoListRemote");
 
@@ -187,6 +147,45 @@ function createRemoteTabItem(tab, icon) {
     selectedRemoteTab = tab.id;
     renderRemoteTabList(); // Re-render to update selection
   });
+
+  return div;
+}
+
+function createTabItem(tab, icon) {
+  const div = document.createElement("div");
+  div.className = "tab-item";
+  div.dataset.tabId = tab.id;
+
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.className = "tab-checkbox";
+  checkbox.id = `tab-${tab.id}`;
+
+  const iconSpan = document.createElement("span");
+  iconSpan.className = "tab-icon";
+  iconSpan.textContent = icon;
+
+  const titleSpan = document.createElement("span");
+  titleSpan.className = "tab-title";
+  titleSpan.textContent = tab.title;
+
+  const badgeSpan = document.createElement("span");
+  badgeSpan.className = "tab-badge";
+  badgeSpan.id = `badge-${tab.id}`;
+  badgeSpan.style.display = "none";
+
+  div.appendChild(checkbox);
+  div.appendChild(iconSpan);
+  div.appendChild(titleSpan);
+  div.appendChild(badgeSpan);
+
+  div.addEventListener("click", (e) => {
+    if (e.target !== checkbox) {
+      checkbox.click();
+    }
+  });
+
+  checkbox.addEventListener("change", () => toggleTab(tab.id));
 
   return div;
 }
@@ -251,26 +250,27 @@ async function checkSyncStatus() {
     type: "GET_SYNC_STATE",
   });
 
-  if (syncState.isActive) {
-    // Pre-select the synced tabs
-    if (syncState.tabs.primary && syncState.tabs.secondary) {
-      selectedTabs = [syncState.tabs.primary, syncState.tabs.secondary];
+  // Check local sync
+  if (syncState.mode === 'local' && syncState.local.isActive) {
+    if (syncState.local.tabs.primary && syncState.local.tabs.secondary) {
+      selectedTabs = [syncState.local.tabs.primary, syncState.local.tabs.secondary];
 
-      // Check the checkboxes
-      const checkbox1 = document.getElementById(
-        `tab-${syncState.tabs.primary}`,
-      );
-      const checkbox2 = document.getElementById(
-        `tab-${syncState.tabs.secondary}`,
-      );
+      const checkbox1 = document.getElementById(`tab-${syncState.local.tabs.primary}`);
+      const checkbox2 = document.getElementById(`tab-${syncState.local.tabs.secondary}`);
       if (checkbox1) checkbox1.checked = true;
       if (checkbox2) checkbox2.checked = true;
 
-      // Update badges
       updateBadges();
     }
 
-    showSyncActive(syncState);
+    showSyncActive(syncState.local);
+  }
+
+  // Check remote sync
+  if (syncState.mode === 'remote' && syncState.remote.isActive) {
+    switchMode('remote');
+    selectedRemoteTab = syncState.remote.localTabId;
+    showRemoteConnected(syncState.remote);
   }
 }
 
@@ -370,16 +370,16 @@ async function stopSync() {
     type: "GET_SYNC_STATE",
   });
 
-  if (syncState.tabs.primary) {
+  if (syncState.local.tabs.primary) {
     chrome.tabs
-      .sendMessage(syncState.tabs.primary, { type: "DISABLE_SYNC" })
+      .sendMessage(syncState.local.tabs.primary, { type: "DISABLE_SYNC" })
       .catch((err) => {
         console.log("Tab may be closed:", err);
       });
   }
-  if (syncState.tabs.secondary) {
+  if (syncState.local.tabs.secondary) {
     chrome.tabs
-      .sendMessage(syncState.tabs.secondary, { type: "DISABLE_SYNC" })
+      .sendMessage(syncState.local.tabs.secondary, { type: "DISABLE_SYNC" })
       .catch((err) => {
         console.log("Tab may be closed:", err);
       });
@@ -407,46 +407,31 @@ async function createRoom() {
   showRemoteConnecting();
 
   try {
-    // Create WebRTC manager instance
-    webrtcManager = new WebRTCManager();
-
-    // Set up message handler
-    webrtcManager.onMessage((msg) => {
-      console.log('Received remote message:', msg);
-    });
-
-    // Set up state change handler
-    webrtcManager.onStateChange((state) => {
-      console.log('WebRTC state changed:', state);
-      if (state === 'connected') {
-        showRemoteConnected({ roomId: webrtcManager.roomId });
-      } else if (state === 'disconnected') {
-        hideRemoteConnecting();
-      }
-    });
-
     // Enable sync on selected tab
     await chrome.tabs.sendMessage(selectedRemoteTab, { 
       type: "ENABLE_SYNC", 
       isPrimary: true 
     });
 
-    // Create room using WebRTC manager
-    const roomId = await webrtcManager.createRoom(signalingUrl);
-    
-    document.getElementById("displayRoomId").textContent = roomId;
-    document.getElementById("connectingRoomId").textContent = roomId;
-    
-    // Notify background
-    await chrome.runtime.sendMessage({
+    // Create room via background
+    const result = await chrome.runtime.sendMessage({
       type: "REMOTE_CREATE_ROOM",
       tabId: selectedRemoteTab,
       signalingUrl: signalingUrl
     });
-    
+
+    if (result.success) {
+      document.getElementById("displayRoomId").textContent = result.roomId;
+      document.getElementById("connectingRoomId").textContent = result.roomId;
+      
+      // Poll for connection status
+      pollRemoteConnection();
+    } else {
+      throw new Error(result.error || "Failed to create room");
+    }
   } catch (error) {
     console.error("Error creating room:", error);
-    alert(`Failed to create room: ${error.message}\n\nMake sure the signaling server is running at:\n${document.getElementById("signalingUrl").value}`);
+    alert(`Failed to create room: ${error.message}\n\nMake sure the signaling server is running.`);
     hideRemoteConnecting();
   }
 }
@@ -474,48 +459,57 @@ async function joinRoom() {
   showRemoteConnecting();
 
   try {
-    // Create WebRTC manager instance
-    webrtcManager = new WebRTCManager();
-
-    // Set up message handler
-    webrtcManager.onMessage((msg) => {
-      console.log('Received remote message:', msg);
-    });
-
-    // Set up state change handler
-    webrtcManager.onStateChange((state) => {
-      console.log('WebRTC state changed:', state);
-      if (state === 'connected') {
-        showRemoteConnected({ roomId: webrtcManager.roomId });
-      } else if (state === 'disconnected') {
-        hideRemoteConnecting();
-      }
-    });
-
     // Enable sync on selected tab
     await chrome.tabs.sendMessage(selectedRemoteTab, { 
       type: "ENABLE_SYNC", 
       isPrimary: true 
     });
 
-    // Join room using WebRTC manager
-    await webrtcManager.joinRoom(roomId, signalingUrl);
-    
-    document.getElementById("displayRoomId").textContent = roomId;
-    
-    // Notify background
-    await chrome.runtime.sendMessage({
+    // Join room via background
+    const result = await chrome.runtime.sendMessage({
       type: "REMOTE_JOIN_ROOM",
       tabId: selectedRemoteTab,
       roomId: roomId,
       signalingUrl: signalingUrl
     });
-    
+
+    if (result.success) {
+      document.getElementById("displayRoomId").textContent = result.roomId;
+      
+      // Poll for connection status
+      pollRemoteConnection();
+    } else {
+      throw new Error(result.error || "Failed to join room");
+    }
   } catch (error) {
     console.error("Error joining room:", error);
     alert(`Failed to join room: ${error.message}\n\nMake sure:\n- The signaling server is running\n- The room code is correct\n- Your partner created the room`);
     hideRemoteConnecting();
   }
+}
+
+async function pollRemoteConnection() {
+  const maxAttempts = 30; // 30 seconds
+  let attempts = 0;
+
+  const checkConnection = setInterval(async () => {
+    attempts++;
+
+    const syncState = await chrome.runtime.sendMessage({
+      type: "GET_SYNC_STATE",
+    });
+
+    if (syncState.remote.connectionState === 'connected') {
+      clearInterval(checkConnection);
+      showRemoteConnected(syncState.remote);
+    } else if (attempts >= maxAttempts || syncState.remote.connectionState === 'disconnected') {
+      clearInterval(checkConnection);
+      if (syncState.remote.connectionState === 'disconnected') {
+        alert("Connection failed or timed out. Please try again.");
+        hideRemoteConnecting();
+      }
+    }
+  }, 1000);
 }
 
 function showRemoteConnecting() {
@@ -548,12 +542,6 @@ async function stopRemoteSync() {
       .catch((err) => {
         console.log("Tab may be closed:", err);
       });
-  }
-
-  // Disconnect WebRTC
-  if (webrtcManager) {
-    webrtcManager.disconnect();
-    webrtcManager = null;
   }
 
   await chrome.runtime.sendMessage({ type: "REMOTE_STOP" });

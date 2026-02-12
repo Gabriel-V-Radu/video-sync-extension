@@ -5,7 +5,7 @@
   <title>Video Sync</title>
   <style>
     body {
-      width: 400px;
+      width: 450px;
       padding: 15px;
       font-family: Arial, sans-serif;
       margin: 0;
@@ -19,6 +19,106 @@
 
     .section {
       margin-bottom: 20px;
+    }
+
+    .mode-selector {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .mode-btn {
+      flex: 1;
+      padding: 10px;
+      border: 2px solid #ddd;
+      background: #f5f5f5;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: bold;
+      font-size: 14px;
+      color: #666;
+      transition: all 0.2s;
+    }
+
+    .mode-btn:hover {
+      border-color: #2196f3;
+    }
+
+    .mode-btn.active {
+      background: #2196f3;
+      color: white;
+      border-color: #2196f3;
+    }
+
+    .mode-content {
+      display: none;
+    }
+
+    .mode-content.active {
+      display: block;
+    }
+
+    .input-group {
+      margin-bottom: 15px;
+    }
+
+    .input-label {
+      font-size: 12px;
+      font-weight: bold;
+      color: #666;
+      margin-bottom: 5px;
+      display: block;
+    }
+
+    .input-field {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+
+    .room-display {
+      background: #fff3cd;
+      border: 2px dashed #ffc107;
+      border-radius: 4px;
+      padding: 15px;
+      margin-bottom: 15px;
+      text-align: center;
+    }
+
+    .room-id {
+      font-size: 24px;
+      font-weight: bold;
+      letter-spacing: 3px;
+      color: #333;
+      margin: 10px 0;
+      font-family: monospace;
+    }
+
+    .connection-status {
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: bold;
+      display: inline-block;
+      margin-bottom: 10px;
+    }
+
+    .connection-status.disconnected {
+      background: #f5f5f5;
+      color: #666;
+    }
+
+    .connection-status.connecting {
+      background: #fff3cd;
+      color: #856404;
+    }
+
+    .connection-status.connected {
+      background: #d4edda;
+      color: #155724;
     }
 
     .tab-list {
@@ -166,14 +266,15 @@
 <body>
   <h2>🔗 Video Sync Player</h2>
 
+  <div id="status" class="status" style="display: none;"></div>
+
+  <!-- Mode Selector -->
   <div class="mode-selector">
-    <button class="mode-btn active" data-mode="local">💻 Local Sync</button>
+    <button class="mode-btn active" data-mode="local">🖥️ Local Sync</button>
     <button class="mode-btn" data-mode="remote">🌐 Remote Sync</button>
   </div>
 
-  <div id="status" class="status" style="display: none;"></div>
-
-  <!-- Local Sync Mode -->
+  <!-- Local Mode Content -->
   <div id="local-mode" class="mode-content active">
     <div class="section">
       <div class="label">SELECT 2 VIDEOS TO SYNC</div>
@@ -190,7 +291,7 @@
     </div>
 
     <button id="startSync" class="btn btn-primary" disabled>
-      Start Sync
+      Start Local Sync
     </button>
 
     <button id="stopSync" class="btn btn-danger" style="display: none;">
@@ -198,19 +299,25 @@
     </button>
   </div>
 
-  <!-- Remote Sync Mode -->
-  <div id="remote-mode" class="mode-content" style="display: none;">
-    <div class="section">
-      <div class="label">SIGNALING SERVER URL</div>
-      <input id="signalingUrl" type="text" placeholder="wss://your-app.up.railway.app" class="tab-input">
+  <!-- Remote Mode Content -->
+  <div id="remote-mode" class="mode-content">
+    <div class="input-group">
+      <label class="input-label">SIGNALING SERVER URL</label>
+      <input 
+        type="text" 
+        id="signalingUrl" 
+        class="input-field" 
+        placeholder="ws://localhost:8080"
+        value="ws://localhost:8080"
+      >
       <div style="font-size: 11px; color: #666; margin-top: 5px;">
-        Remote server URL (e.g., Railway, Glitch, etc.)
+        Run signaling server or use deployed URL
       </div>
     </div>
 
     <div class="section">
       <div class="label">SELECT YOUR VIDEO TAB</div>
-      <div id="videoListRemote" class="tab-list">
+      <div id="videoListRemote" class="tab-list" style="max-height: 150px;">
         <div class="empty">No video tabs found</div>
       </div>
     </div>
@@ -220,11 +327,20 @@
         Create Room & Get Code
       </button>
 
-      <div style="text-align: center; margin: 15px 0; color: #666;">— OR —</div>
+      <div style="text-align: center; margin: 15px 0; color: #999; font-size: 12px;">
+        — OR —
+      </div>
 
-      <div class="section">
-        <div class="label">ROOM CODE (FROM YOUR PARTNER)</div>
-        <input id="roomIdInput" type="text" placeholder="ENTER 6-CHARACTER CODE" class="tab-input" maxlength="6">
+      <div class="input-group">
+        <label class="input-label">ROOM CODE (FROM YOUR PARTNER)</label>
+        <input 
+          type="text" 
+          id="roomIdInput" 
+          class="input-field" 
+          placeholder="Enter 6-character code"
+          maxlength="6"
+          style="text-transform: uppercase;"
+        >
       </div>
 
       <button id="joinRoom" class="btn btn-primary">
@@ -260,93 +376,6 @@
     </div>
   </div>
 
-  <style>
-    .mode-selector {
-      display: flex;
-      gap: 10px;
-      margin-bottom: 20px;
-    }
-
-    .mode-btn {
-      flex: 1;
-      padding: 10px;
-      border: 2px solid #ddd;
-      background: #f5f5f5;
-      border-radius: 4px;
-      cursor: pointer;
-      font-weight: bold;
-      font-size: 13px;
-      color: #666;
-      transition: all 0.2s;
-    }
-
-    .mode-btn:hover {
-      border-color: #2196f3;
-    }
-
-    .mode-btn.active {
-      background: #2196f3;
-      color: white;
-      border-color: #2196f3;
-    }
-
-    .mode-content {
-      display: none;
-    }
-
-    .mode-content.active {
-      display: block;
-    }
-
-    .tab-input {
-      width: 100%;
-      padding: 10px;
-      border: 1px solid #ddd;
-      border-radius: 4px;
-      font-size: 13px;
-      box-sizing: border-box;
-    }
-
-    .tab-input:focus {
-      outline: none;
-      border-color: #2196f3;
-      box-shadow: 0 0 5px rgba(33, 150, 243, 0.1);
-    }
-
-    .room-display {
-      border: 2px solid #2196f3;
-      border-radius: 4px;
-      padding: 15px;
-      margin-bottom: 15px;
-      background: #f5f9ff;
-    }
-
-    .connection-status {
-      font-size: 16px;
-      font-weight: bold;
-      margin-bottom: 10px;
-      color: #2196f3;
-    }
-
-    .connection-status.connected {
-      color: #28a745;
-    }
-
-    .connection-status.connecting {
-      color: #ffc107;
-    }
-
-    .room-id {
-      font-size: 24px;
-      font-weight: bold;
-      letter-spacing: 2px;
-      font-family: monospace;
-      color: #2196f3;
-      margin: 10px 0;
-    }
-  </style>
-
-  <script src="../webrtc-manager.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

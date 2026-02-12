@@ -1,4 +1,11 @@
-let syncState = {
+// Import WebRTC Manager for remote sync
+importScripts('webrtc-manager.js');
+
+// Sync modes: 'local' or 'remote'
+let syncMode = 'local'; // Default to local sync
+
+// Local sync state (for same-browser tab sync)
+let localSyncState = {
   isActive: false,
   tabs: {
     primary: null,
@@ -8,22 +15,43 @@ let syncState = {
   timeOffset: 0 // secondaryTime - primaryTime
 };
 
-// Remote sync state
-let remoteSync = {
+// Remote sync state (for different-browser WebRTC sync)
+let remoteSyncState = {
   isActive: false,
-  localTabId: null,
-  signalingUrl: null,
-  connectionState: 'disconnected'
+  localTabId: null, // The tab on this browser
+  webrtc: null, // WebRTCManager instance
+  roomId: null,
+  isHost: false,
+  connectionState: 'disconnected',
+  signalingUrl: null
 };
 
 let registeredTabs = new Map(); // tabId -> { site, url, timestamp }
 
+function resetLocalSyncState() {
+  localSyncState.isActive = false;
+  localSyncState.tabs = { primary: null, secondary: null };
+  localSyncState.timeOffset = 0;
+  delete localSyncState.primaryTime;
+  delete localSyncState.secondaryTime;
+}
+
+function resetRemoteSyncState() {
+  if (remoteSyncState.webrtc) {
+    remoteSyncState.webrtc.disconnect();
+    remoteSyncState.webrtc = null;
+  }
+  remoteSyncState.isActive = false;
+  remoteSyncState.localTabId = null;
+  remoteSyncState.roomId = null;
+  remoteSyncState.isHost = false;
+  remoteSyncState.connectionState = 'disconnected';
+}
+
 function resetSyncState() {
-  syncState.isActive = false;
-  syncState.tabs = { primary: null, secondary: null };
-  syncState.timeOffset = 0;
-  delete syncState.primaryTime;
-  delete syncState.secondaryTime;
+  resetLocalSyncState();
+  resetRemoteSyncState();
+  syncMode = 'local';
 }
 
 // Load registered tabs from storage on startup
@@ -77,45 +105,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       break;
 
     case 'GET_SYNC_STATE':
-      sendResponse({ local: syncState, remote: remoteSync, mode: remoteSync.isActive ? 'remote' : 'local' });
+      sendResponse({
+        mode: syncMode,
+        local: localSyncState,
+        remote: {
+          isActive: remoteSyncState.isActive,
+          localTabId: remoteSyncState.localTabId,
+          roomId: remoteSyncState.roomId,
+          isHost: remoteSyncState.isHost,
+          connectionState: remoteSyncState.connectionState
+        }
+      });
       break;
 
     case 'SET_TABS':
-      syncState.tabs.primary = message.primaryTabId;
-      syncState.tabs.secondary = message.secondaryTabId;
-      syncState.isActive = true;
+      // Local sync mode
+      syncMode = 'local';
+      localSyncState.tabs.primary = message.primaryTabId;
+      localSyncState.tabs.secondary = message.secondaryTabId;
+      localSyncState.isActive = true;
       sendResponse({ success: true });
       break;
 
     case 'STOP_SYNC':
-      syncState.isActive = false;
       resetSyncState();
-      sendResponse({ success: true });
-      break;
-
-    case 'REMOTE_CREATE_ROOM':
-      remoteSync.localTabId = message.tabId;
-      remoteSync.signalingUrl = message.signalingUrl;
-      remoteSync.isActive = true;
-      sendResponse({ success: true });
-      break;
-
-    case 'REMOTE_JOIN_ROOM':
-      remoteSync.localTabId = message.tabId;
-      remoteSync.signalingUrl = message.signalingUrl;
-      remoteSync.isActive = true;
-      sendResponse({ success: true });
-      break;
-
-    case 'REMOTE_STOP':
-      remoteSync.isActive = false;
-      remoteSync.localTabId = null;
-      remoteSync.connectionState = 'disconnected';
-      sendResponse({ success: true });
-      break;
-
-    case 'UPDATE_REMOTE_CONNECTION':
-      remoteSync.connectionState = message.state;
       sendResponse({ success: true });
       break;
 
@@ -125,6 +138,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         ...data
       }));
       sendResponse({ tabs });
+      break;
+
+    // Remote sync commands
+    case 'REMOTE_CREATE_ROOM':
+      handleRemoteCreateRoom(message, sendResponse);
+      return true; // Async response
+
+    case 'REMOTE_JOIN_ROOM':
+      handleRemoteJoinRoom(message, sendResponse);
+      return true; // Async response
+
+    case 'REMOTE_STOP':
+      resetRemoteSyncState();
+      sendResponse({ success: true });
       break;
 
     default:
@@ -151,21 +178,30 @@ async function handleRegisterTab(message, sender) {
 }
 
 function handlePlayerAction(message, sender) {
-  if (!syncState.isActive) return;
-
   const action = message.action;
   const senderTabId = sender?.tab?.id;
   if (senderTabId === undefined) return;
 
+  // Route based on sync mode
+  if (syncMode === 'local') {
+    handleLocalPlayerAction(senderTabId, action);
+  } else if (syncMode === 'remote') {
+    handleRemotePlayerAction(senderTabId, action);
+  }
+}
+
+function handleLocalPlayerAction(senderTabId, action) {
+  if (!localSyncState.isActive) return;
+
   // Only accept actions from the primary tab
-  if (senderTabId !== syncState.tabs.primary) {
-    console.log(`Ignoring action from secondary tab ${senderTabId}`);
+  if (senderTabId !== localSyncState.tabs.primary) {
+    console.log(`[Local] Ignoring action from secondary tab ${senderTabId}`);
     return;
   }
 
-  console.log(`Player action from primary tab ${senderTabId}:`, action);
+  console.log(`[Local] Player action from primary tab ${senderTabId}:`, action);
 
-  syncState.lastAction = {
+  localSyncState.lastAction = {
     ...action,
     timestamp: Date.now(),
     sourceTab: senderTabId
@@ -174,18 +210,39 @@ function handlePlayerAction(message, sender) {
   // Add offset to the action for secondary player
   const actionWithOffset = {
     ...action,
-    timeOffset: syncState.timeOffset
+    timeOffset: localSyncState.timeOffset
   };
 
   // Forward to secondary tab only
-  const targetTabId = syncState.tabs.secondary;
+  const targetTabId = localSyncState.tabs.secondary;
 
   if (targetTabId) {
     chrome.tabs.sendMessage(targetTabId, {
       type: 'SYNC_ACTION',
       action: actionWithOffset
     }).catch(err => {
-      console.error('Failed to send sync action:', err);
+      console.error('[Local] Failed to send sync action:', err);
+    });
+  }
+}
+
+function handleRemotePlayerAction(senderTabId, action) {
+  if (!remoteSyncState.isActive) return;
+
+  // Only accept actions from our designated local tab
+  if (senderTabId !== remoteSyncState.localTabId) {
+    console.log(`[Remote] Ignoring action from non-synced tab ${senderTabId}`);
+    return;
+  }
+
+  console.log(`[Remote] Player action from local tab ${senderTabId}:`, action);
+
+  // Send action to remote peer via WebRTC
+  if (remoteSyncState.webrtc && remoteSyncState.connectionState === 'connected') {
+    remoteSyncState.webrtc.sendSyncMessage({
+      type: 'sync-action',
+      action: action,
+      timestamp: Date.now()
     });
   }
 }
@@ -195,22 +252,124 @@ function handleReportTime(message, sender) {
   if (senderTabId === undefined) return;
   const currentTime = message.currentTime;
 
-  if (senderTabId === syncState.tabs.primary) {
-    // Store primary time, wait for secondary
-    syncState.primaryTime = currentTime;
-  } else if (senderTabId === syncState.tabs.secondary) {
-    // Store secondary time, wait for primary
-    syncState.secondaryTime = currentTime;
+  // Only handle for local sync mode
+  if (syncMode === 'local' && localSyncState.isActive) {
+    if (senderTabId === localSyncState.tabs.primary) {
+      // Store primary time, wait for secondary
+      localSyncState.primaryTime = currentTime;
+    } else if (senderTabId === localSyncState.tabs.secondary) {
+      // Store secondary time, wait for primary
+      localSyncState.secondaryTime = currentTime;
+    }
+
+    // If we have both times, calculate offset
+    if (localSyncState.primaryTime !== undefined && localSyncState.secondaryTime !== undefined) {
+      localSyncState.timeOffset = localSyncState.secondaryTime - localSyncState.primaryTime;
+      console.log(`[Local] Time offset calculated: ${localSyncState.timeOffset.toFixed(2)}s (secondary ${localSyncState.timeOffset > 0 ? 'ahead' : 'behind'})`);
+
+      // Clear temp values
+      delete localSyncState.primaryTime;
+      delete localSyncState.secondaryTime;
+    }
   }
+}
 
-  // If we have both times, calculate offset
-  if (syncState.primaryTime !== undefined && syncState.secondaryTime !== undefined) {
-    syncState.timeOffset = syncState.secondaryTime - syncState.primaryTime;
-    console.log(`Time offset calculated: ${syncState.timeOffset.toFixed(2)}s (secondary ${syncState.timeOffset > 0 ? 'ahead' : 'behind'})`);
+// Remote sync handlers
+async function handleRemoteCreateRoom(message, sendResponse) {
+  try {
+    syncMode = 'remote';
+    remoteSyncState.localTabId = message.tabId;
+    remoteSyncState.signalingUrl = message.signalingUrl;
+    remoteSyncState.isHost = true;
 
-    // Clear temp values
-    delete syncState.primaryTime;
-    delete syncState.secondaryTime;
+    // Create WebRTC manager
+    remoteSyncState.webrtc = new WebRTCManager();
+
+    // Setup callbacks
+    remoteSyncState.webrtc.onMessage((msg) => {
+      handleRemoteMessage(msg);
+    });
+
+    remoteSyncState.webrtc.onStateChange((state) => {
+      remoteSyncState.connectionState = state;
+      console.log('[Remote] Connection state:', state);
+    });
+
+    // Create room
+    const roomId = await remoteSyncState.webrtc.createRoom(message.signalingUrl);
+    remoteSyncState.roomId = roomId;
+    remoteSyncState.isActive = true;
+
+    sendResponse({ 
+      success: true, 
+      roomId: roomId,
+      isHost: true
+    });
+  } catch (error) {
+    console.error('[Remote] Failed to create room:', error);
+    resetRemoteSyncState();
+    sendResponse({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+}
+
+async function handleRemoteJoinRoom(message, sendResponse) {
+  try {
+    syncMode = 'remote';
+    remoteSyncState.localTabId = message.tabId;
+    remoteSyncState.roomId = message.roomId;
+    remoteSyncState.signalingUrl = message.signalingUrl;
+    remoteSyncState.isHost = false;
+
+    // Create WebRTC manager
+    remoteSyncState.webrtc = new WebRTCManager();
+
+    // Setup callbacks
+    remoteSyncState.webrtc.onMessage((msg) => {
+      handleRemoteMessage(msg);
+    });
+
+    remoteSyncState.webrtc.onStateChange((state) => {
+      remoteSyncState.connectionState = state;
+      console.log('[Remote] Connection state:', state);
+    });
+
+    // Join room
+    await remoteSyncState.webrtc.joinRoom(message.roomId, message.signalingUrl);
+    remoteSyncState.isActive = true;
+
+    sendResponse({ 
+      success: true, 
+      roomId: message.roomId,
+      isHost: false
+    });
+  } catch (error) {
+    console.error('[Remote] Failed to join room:', error);
+    resetRemoteSyncState();
+    sendResponse({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+}
+
+function handleRemoteMessage(message) {
+  console.log('[Remote] Received message from peer:', message);
+
+  if (message.type === 'sync-action' && message.action) {
+    // Forward action to local tab
+    const targetTabId = remoteSyncState.localTabId;
+    
+    if (targetTabId) {
+      chrome.tabs.sendMessage(targetTabId, {
+        type: 'SYNC_ACTION',
+        action: message.action
+      }).catch(err => {
+        console.error('[Remote] Failed to send sync action to tab:', err);
+      });
+    }
   }
 }
 
@@ -223,8 +382,17 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
     await saveRegisteredTabs();
   }
 
-  // Clean up sync state
-  if (tabId === syncState.tabs.primary || tabId === syncState.tabs.secondary) {
-    resetSyncState();
+  // Clean up local sync state
+  if (syncMode === 'local') {
+    if (tabId === localSyncState.tabs.primary || tabId === localSyncState.tabs.secondary) {
+      resetLocalSyncState();
+    }
+  }
+
+  // Clean up remote sync state
+  if (syncMode === 'remote') {
+    if (tabId === remoteSyncState.localTabId) {
+      resetRemoteSyncState();
+    }
   }
 });
