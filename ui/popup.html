@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Video Sync</title>
+  <style>
+    body {
+      width: 400px;
+      padding: 15px;
+      font-family: Arial, sans-serif;
+      margin: 0;
+    }
+
+    h2 {
+      margin-top: 0;
+      font-size: 18px;
+      color: #333;
+    }
+
+    .section {
+      margin-bottom: 20px;
+    }
+
+    .tab-list {
+      max-height: 200px;
+      overflow-y: auto;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+
+    .tab-item {
+      padding: 10px;
+      border-bottom: 1px solid #eee;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      transition: background 0.2s;
+    }
+
+    .tab-item:hover {
+      background: #f5f5f5;
+    }
+
+    .tab-item:last-child {
+      border-bottom: none;
+    }
+
+    .tab-checkbox {
+      width: 18px;
+      height: 18px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .tab-icon {
+      font-size: 16px;
+    }
+
+    .tab-title {
+      flex: 1;
+      font-size: 13px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .tab-badge {
+      font-size: 10px;
+      font-weight: bold;
+      padding: 3px 8px;
+      border-radius: 3px;
+      flex-shrink: 0;
+      text-transform: uppercase;
+    }
+
+    .tab-badge.primary {
+      background: #2196f3;
+      color: white;
+    }
+
+    .tab-badge.secondary {
+      background: #9e9e9e;
+      color: white;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 10px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: bold;
+      font-size: 14px;
+      margin-top: 10px;
+    }
+
+    .btn-primary {
+      background: #2196f3;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #1976d2;
+    }
+
+    .btn-primary:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+
+    .btn-danger {
+      background: #f44336;
+      color: white;
+    }
+
+    .btn-danger:hover {
+      background: #d32f2f;
+    }
+
+    .status {
+      padding: 10px;
+      background: #fff3cd;
+      border: 1px solid #ffc107;
+      border-radius: 4px;
+      font-size: 13px;
+      margin-bottom: 15px;
+    }
+
+    .status.active {
+      background: #d4edda;
+      border-color: #28a745;
+    }
+
+    .label {
+      font-size: 12px;
+      font-weight: bold;
+      color: #666;
+      margin-bottom: 5px;
+    }
+
+    .empty {
+      padding: 20px;
+      text-align: center;
+      color: #999;
+      font-size: 13px;
+    }
+
+    .info-box {
+      background: #e3f2fd;
+      border: 1px solid #2196f3;
+      border-radius: 4px;
+      padding: 12px;
+      margin-bottom: 15px;
+      font-size: 13px;
+      line-height: 1.5;
+      color: #1565c0;
+    }
+
+    .info-box strong {
+      display: block;
+      margin-bottom: 5px;
+    }
+  </style>
+</head>
+<body>
+  <h2>🔗 Video Sync Player</h2>
+
+  <div id="status" class="status" style="display: none;"></div>
+
+  <div class="section">
+    <div class="label">SELECT 2 VIDEOS TO SYNC</div>
+    <div id="videoList" class="tab-list">
+      <div class="empty">No video tabs found</div>
+    </div>
+  </div>
+
+  <div class="info-box">
+    <strong>📝 Instructions:</strong><br>
+    1. Make sure videos are loaded and playing<br>
+    2. Select 2 videos below (first = PRIMARY, controls sync)<br>
+    3. Click "Start Sync"
+  </div>
+
+  <button id="startSync" class="btn btn-primary" disabled>
+    Start Sync
+  </button>
+
+  <button id="stopSync" class="btn btn-danger" style="display: none;">
+    Stop Sync
+  </button>
+
+  <script src="popup.js"></script>
+</body>
+</html>

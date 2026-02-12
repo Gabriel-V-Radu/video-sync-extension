@@ -1,0 +1,13 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor folders
+.vscode/
+.claude/
+
+# Node artifacts (only needed if generating icons)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
