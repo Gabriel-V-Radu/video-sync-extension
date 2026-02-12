@@ -5,7 +5,7 @@
   <title>Video Sync</title>
   <style>
     body {
-      width: 400px;
+      width: 450px;
       padding: 15px;
       font-family: Arial, sans-serif;
       margin: 0;
@@ -19,6 +19,106 @@
 
     .section {
       margin-bottom: 20px;
+    }
+
+    .mode-selector {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .mode-btn {
+      flex: 1;
+      padding: 10px;
+      border: 2px solid #ddd;
+      background: #f5f5f5;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: bold;
+      font-size: 14px;
+      color: #666;
+      transition: all 0.2s;
+    }
+
+    .mode-btn:hover {
+      border-color: #2196f3;
+    }
+
+    .mode-btn.active {
+      background: #2196f3;
+      color: white;
+      border-color: #2196f3;
+    }
+
+    .mode-content {
+      display: none;
+    }
+
+    .mode-content.active {
+      display: block;
+    }
+
+    .input-group {
+      margin-bottom: 15px;
+    }
+
+    .input-label {
+      font-size: 12px;
+      font-weight: bold;
+      color: #666;
+      margin-bottom: 5px;
+      display: block;
+    }
+
+    .input-field {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+
+    .room-display {
+      background: #fff3cd;
+      border: 2px dashed #ffc107;
+      border-radius: 4px;
+      padding: 15px;
+      margin-bottom: 15px;
+      text-align: center;
+    }
+
+    .room-id {
+      font-size: 24px;
+      font-weight: bold;
+      letter-spacing: 3px;
+      color: #333;
+      margin: 10px 0;
+      font-family: monospace;
+    }
+
+    .connection-status {
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: bold;
+      display: inline-block;
+      margin-bottom: 10px;
+    }
+
+    .connection-status.disconnected {
+      background: #f5f5f5;
+      color: #666;
+    }
+
+    .connection-status.connecting {
+      background: #fff3cd;
+      color: #856404;
+    }
+
+    .connection-status.connected {
+      background: #d4edda;
+      color: #155724;
     }
 
     .tab-list {
@@ -168,27 +268,113 @@
 
   <div id="status" class="status" style="display: none;"></div>
 
-  <div class="section">
-    <div class="label">SELECT 2 VIDEOS TO SYNC</div>
-    <div id="videoList" class="tab-list">
-      <div class="empty">No video tabs found</div>
+  <!-- Mode Selector -->
+  <div class="mode-selector">
+    <button class="mode-btn active" data-mode="local">🖥️ Local Sync</button>
+    <button class="mode-btn" data-mode="remote">🌐 Remote Sync</button>
+  </div>
+
+  <!-- Local Mode Content -->
+  <div id="local-mode" class="mode-content active">
+    <div class="section">
+      <div class="label">SELECT 2 VIDEOS TO SYNC</div>
+      <div id="videoList" class="tab-list">
+        <div class="empty">No video tabs found</div>
+      </div>
+    </div>
+
+    <div class="info-box">
+      <strong>📝 Instructions:</strong><br>
+      1. Make sure videos are loaded and playing<br>
+      2. Select 2 videos below (first = PRIMARY, controls sync)<br>
+      3. Click "Start Sync"
+    </div>
+
+    <button id="startSync" class="btn btn-primary" disabled>
+      Start Local Sync
+    </button>
+
+    <button id="stopSync" class="btn btn-danger" style="display: none;">
+      Stop Sync
+    </button>
+  </div>
+
+  <!-- Remote Mode Content -->
+  <div id="remote-mode" class="mode-content">
+    <div class="input-group">
+      <label class="input-label">SIGNALING SERVER URL</label>
+      <input 
+        type="text" 
+        id="signalingUrl" 
+        class="input-field" 
+        placeholder="ws://localhost:8080"
+        value="ws://localhost:8080"
+      >
+      <div style="font-size: 11px; color: #666; margin-top: 5px;">
+        Run signaling server or use deployed URL
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="label">SELECT YOUR VIDEO TAB</div>
+      <div id="videoListRemote" class="tab-list" style="max-height: 150px;">
+        <div class="empty">No video tabs found</div>
+      </div>
+    </div>
+
+    <div id="remoteActions">
+      <button id="createRoom" class="btn btn-primary">
+        Create Room & Get Code
+      </button>
+
+      <div style="text-align: center; margin: 15px 0; color: #999; font-size: 12px;">
+        — OR —
+      </div>
+
+      <div class="input-group">
+        <label class="input-label">ROOM CODE (FROM YOUR PARTNER)</label>
+        <input 
+          type="text" 
+          id="roomIdInput" 
+          class="input-field" 
+          placeholder="Enter 6-character code"
+          maxlength="6"
+          style="text-transform: uppercase;"
+        >
+      </div>
+
+      <button id="joinRoom" class="btn btn-primary">
+        Join Room
+      </button>
+    </div>
+
+    <div id="remoteConnected" style="display: none;">
+      <div class="room-display">
+        <div class="connection-status connected">● CONNECTED</div>
+        <div style="font-size: 12px; color: #666;">Room Code:</div>
+        <div id="displayRoomId" class="room-id">------</div>
+        <div style="font-size: 11px; color: #666;">
+          Share this code with your sync partner
+        </div>
+      </div>
+
+      <div class="info-box">
+        ✓ Connected! Play/pause/seek on your video and it will sync with your partner's video.
+      </div>
+
+      <button id="stopRemoteSync" class="btn btn-danger">
+        Disconnect
+      </button>
+    </div>
+
+    <div id="remoteConnecting" style="display: none;">
+      <div class="room-display">
+        <div class="connection-status connecting">⟳ CONNECTING...</div>
+        <div style="font-size: 12px; color: #666;">Room Code:</div>
+        <div id="connectingRoomId" class="room-id">------</div>
+      </div>
     </div>
   </div>
-
-  <div class="info-box">
-    <strong>📝 Instructions:</strong><br>
-    1. Make sure videos are loaded and playing<br>
-    2. Select 2 videos below (first = PRIMARY, controls sync)<br>
-    3. Click "Start Sync"
-  </div>
-
-  <button id="startSync" class="btn btn-primary" disabled>
-    Start Sync
-  </button>
-
-  <button id="stopSync" class="btn btn-danger" style="display: none;">
-    Stop Sync
-  </button>
 
   <script src="popup.js"></script>
 </body>
