@@ -1,0 +1,22 @@
+{
+  "name": "video-sync-signaling-server",
+  "version": "1.0.0",
+  "description": "WebSocket signaling server for Video Sync Extension WebRTC connections",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "keywords": ["webrtc", "signaling", "websocket"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.3"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
