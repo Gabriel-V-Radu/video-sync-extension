@@ -57,6 +57,7 @@ For syncing over the internet, deploy to a free service:
 3. Switch to **"🌐 Remote Sync"** tab
 4. Enter signaling server URL (from Step 1)
 	- The extension remembers this URL for next time
+	- For hosted servers (Railway/Render/etc), use `wss://...` not `ws://...`
 5. Click on your video tab to select it
 6. Click **"Create Room & Get Code"**
 7. Wait for 6-character code to appear (e.g., `ABC123`)

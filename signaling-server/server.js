@@ -37,7 +37,7 @@ wss.on('connection', (ws) => {
         case 'offer':
         case 'answer':
         case 'ice-candidate':
-          relayMessage(data);
+          relayMessage(ws, data);
           break;
 
         default:
@@ -141,7 +141,7 @@ function handleJoinRoom(ws, data) {
   console.log('Guest joined room:', roomId);
 }
 
-function relayMessage(data) {
+function relayMessage(senderWs, data) {
   const roomId = data.roomId;
   
   if (!rooms.has(roomId)) {
@@ -152,13 +152,21 @@ function relayMessage(data) {
   const room = rooms.get(roomId);
   const message = JSON.stringify(data);
 
-  // Relay to both host and guest (they'll know if it's for them)
-  if (room.host) {
-    room.host.send(message);
+  if (senderWs === room.host) {
+    if (room.guest) {
+      room.guest.send(message);
+    }
+    return;
   }
-  if (room.guest) {
-    room.guest.send(message);
+
+  if (senderWs === room.guest) {
+    if (room.host) {
+      room.host.send(message);
+    }
+    return;
   }
+
+  console.error('Cannot relay message: sender is not in room');
 }
 
 // Cleanup old rooms every 5 minutes

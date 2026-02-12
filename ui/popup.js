@@ -31,7 +31,7 @@ async function init() {
 async function loadSavedSignalingUrl() {
   try {
     const result = await chrome.storage.local.get(SIGNALING_URL_STORAGE_KEY);
-    const url = result[SIGNALING_URL_STORAGE_KEY] || DEFAULT_SIGNALING_URL;
+    const url = normalizeSignalingUrl(result[SIGNALING_URL_STORAGE_KEY] || DEFAULT_SIGNALING_URL);
     const signalingInput = document.getElementById('signalingUrl');
     if (signalingInput) {
       signalingInput.value = url;
@@ -49,6 +49,36 @@ async function saveSignalingUrl(url) {
   } catch (error) {
     console.error('Failed to save signaling URL:', error);
   }
+}
+
+function normalizeSignalingUrl(rawUrl) {
+  const input = (rawUrl || '').trim();
+  if (!input) {
+    return '';
+  }
+
+  let urlValue = input;
+  if (!/^wss?:\/\//i.test(urlValue)) {
+    urlValue = `wss://${urlValue}`;
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(urlValue);
+  } catch (error) {
+    return input;
+  }
+
+  const isLocalHost = ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname);
+  if (isLocalHost && parsed.protocol !== 'ws:') {
+    parsed.protocol = 'ws:';
+  }
+
+  if (!isLocalHost && parsed.protocol !== 'wss:') {
+    parsed.protocol = 'wss:';
+  }
+
+  return parsed.toString().replace(/\/$/, '');
 }
 
 function setupModeSelector() {
@@ -330,14 +360,16 @@ function setupEventListeners() {
 
   const signalingInput = document.getElementById('signalingUrl');
   signalingInput.addEventListener('change', () => {
-    const value = signalingInput.value.trim();
+    const value = normalizeSignalingUrl(signalingInput.value);
     if (value) {
+      signalingInput.value = value;
       saveSignalingUrl(value);
     }
   });
   signalingInput.addEventListener('blur', () => {
-    const value = signalingInput.value.trim();
+    const value = normalizeSignalingUrl(signalingInput.value);
     if (value) {
+      signalingInput.value = value;
       saveSignalingUrl(value);
     }
   });
@@ -445,11 +477,14 @@ async function createRoom() {
     return;
   }
 
-  const signalingUrl = document.getElementById("signalingUrl").value.trim();
+  const signalingInput = document.getElementById("signalingUrl");
+  const signalingUrl = normalizeSignalingUrl(signalingInput.value);
   if (!signalingUrl) {
     alert("Please enter a signaling server URL");
     return;
   }
+
+  signalingInput.value = signalingUrl;
 
   await saveSignalingUrl(signalingUrl);
 
@@ -498,11 +533,14 @@ async function joinRoom() {
     return;
   }
 
-  const signalingUrl = document.getElementById("signalingUrl").value.trim();
+  const signalingInput = document.getElementById("signalingUrl");
+  const signalingUrl = normalizeSignalingUrl(signalingInput.value);
   if (!signalingUrl) {
     alert("Please enter a signaling server URL");
     return;
   }
+
+  signalingInput.value = signalingUrl;
 
   await saveSignalingUrl(signalingUrl);
 

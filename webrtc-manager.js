@@ -9,6 +9,7 @@ class WebRTCManager {
     this.connectionState = 'disconnected'; // disconnected, connecting, connected
     this.onMessageCallback = null;
     this.onStateChangeCallback = null;
+    this.pendingIceCandidates = [];
     
     // STUN servers (Google's public STUN servers)
     this.iceServers = [
@@ -213,12 +214,20 @@ class WebRTCManager {
 
       case 'offer':
         // Guest: receive offer and send answer
-        await this.handleOffer(message.offer);
+        if (!this.isHost) {
+          await this.handleOffer(message.offer);
+        } else {
+          console.warn('Ignoring offer on host peer');
+        }
         break;
 
       case 'answer':
         // Host: receive answer
-        await this.handleAnswer(message.answer);
+        if (this.isHost) {
+          await this.handleAnswer(message.answer);
+        } else {
+          console.warn('Ignoring answer on guest peer');
+        }
         break;
 
       case 'ice-candidate':
@@ -252,7 +261,18 @@ class WebRTCManager {
   // Handle incoming offer (guest only)
   async handleOffer(offer) {
     try {
+      if (!offer || offer.type !== 'offer') {
+        console.warn('Ignoring invalid offer payload');
+        return;
+      }
+
+      if (this.peerConnection.signalingState !== 'stable') {
+        console.warn('Ignoring offer in signaling state:', this.peerConnection.signalingState);
+        return;
+      }
+
       await this.peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+      await this.flushPendingIceCandidates();
       
       const answer = await this.peerConnection.createAnswer();
       await this.peerConnection.setLocalDescription(answer);
@@ -270,18 +290,65 @@ class WebRTCManager {
   // Handle incoming answer (host only)
   async handleAnswer(answer) {
     try {
+      if (!answer || answer.type !== 'answer') {
+        console.warn('Ignoring invalid answer payload');
+        return;
+      }
+
+      if (this.peerConnection.signalingState !== 'have-local-offer') {
+        console.warn('Ignoring answer in signaling state:', this.peerConnection.signalingState);
+        return;
+      }
+
+      if (this.peerConnection.currentRemoteDescription) {
+        console.warn('Ignoring duplicate answer');
+        return;
+      }
+
       await this.peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+      await this.flushPendingIceCandidates();
     } catch (error) {
-      console.error('Failed to handle answer:', error);
+      console.error('Failed to handle answer:', {
+        message: error?.message || error,
+        signalingState: this.peerConnection?.signalingState,
+        hasLocalDescription: !!this.peerConnection?.localDescription,
+        hasRemoteDescription: !!this.peerConnection?.remoteDescription
+      });
     }
   }
 
   // Handle incoming ICE candidate
   async handleIceCandidate(candidate) {
     try {
+      if (!candidate) {
+        return;
+      }
+
+      if (!this.peerConnection.remoteDescription) {
+        this.pendingIceCandidates.push(candidate);
+        return;
+      }
+
       await this.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
     } catch (error) {
       console.error('Failed to add ICE candidate:', error);
+    }
+  }
+
+  async flushPendingIceCandidates() {
+    if (!this.peerConnection?.remoteDescription || this.pendingIceCandidates.length === 0) {
+      return;
+    }
+
+    const pendingCandidates = [...this.pendingIceCandidates];
+    this.pendingIceCandidates = [];
+
+    for (const candidate of pendingCandidates) {
+      try {
+        await this.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (error) {
+        console.error('Failed to apply buffered ICE candidate:', error);
+      }
     }
   }
 
@@ -326,6 +393,7 @@ class WebRTCManager {
 
     this.roomId = null;
     this.isHost = false;
+    this.pendingIceCandidates = [];
     this.updateState('disconnected');
   }
 
