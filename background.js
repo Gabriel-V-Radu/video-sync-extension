@@ -8,6 +8,14 @@ let syncState = {
   timeOffset: 0 // secondaryTime - primaryTime
 };
 
+// Remote sync state
+let remoteSync = {
+  isActive: false,
+  localTabId: null,
+  signalingUrl: null,
+  connectionState: 'disconnected'
+};
+
 let registeredTabs = new Map(); // tabId -> { site, url, timestamp }
 
 function resetSyncState() {
@@ -69,7 +77,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       break;
 
     case 'GET_SYNC_STATE':
-      sendResponse(syncState);
+      sendResponse({ local: syncState, remote: remoteSync, mode: remoteSync.isActive ? 'remote' : 'local' });
       break;
 
     case 'SET_TABS':
@@ -80,7 +88,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       break;
 
     case 'STOP_SYNC':
+      syncState.isActive = false;
       resetSyncState();
+      sendResponse({ success: true });
+      break;
+
+    case 'REMOTE_CREATE_ROOM':
+      remoteSync.localTabId = message.tabId;
+      remoteSync.signalingUrl = message.signalingUrl;
+      remoteSync.isActive = true;
+      sendResponse({ success: true });
+      break;
+
+    case 'REMOTE_JOIN_ROOM':
+      remoteSync.localTabId = message.tabId;
+      remoteSync.signalingUrl = message.signalingUrl;
+      remoteSync.isActive = true;
+      sendResponse({ success: true });
+      break;
+
+    case 'REMOTE_STOP':
+      remoteSync.isActive = false;
+      remoteSync.localTabId = null;
+      remoteSync.connectionState = 'disconnected';
+      sendResponse({ success: true });
+      break;
+
+    case 'UPDATE_REMOTE_CONNECTION':
+      remoteSync.connectionState = message.state;
       sendResponse({ success: true });
       break;
 
