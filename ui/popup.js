@@ -2,6 +2,10 @@ let selectedTabs = [];
 let videoTabs = [];
 let currentMode = 'local'; // 'local' or 'remote'
 let selectedRemoteTab = null;
+let remoteConnectionPollInterval = null;
+
+const DEFAULT_SIGNALING_URL = 'ws://localhost:8080';
+const SIGNALING_URL_STORAGE_KEY = 'remoteSignalingUrl';
 
 const KNOWN_VIDEO_HOSTS = ["youtube.com", "crunchyroll.com", "netflix.com"];
 
@@ -17,10 +21,34 @@ function getTabIcon(url = "") {
 }
 
 async function init() {
+  await loadSavedSignalingUrl();
   await loadVideoTabs();
   await checkSyncStatus();
   setupEventListeners();
   setupModeSelector();
+}
+
+async function loadSavedSignalingUrl() {
+  try {
+    const result = await chrome.storage.local.get(SIGNALING_URL_STORAGE_KEY);
+    const url = result[SIGNALING_URL_STORAGE_KEY] || DEFAULT_SIGNALING_URL;
+    const signalingInput = document.getElementById('signalingUrl');
+    if (signalingInput) {
+      signalingInput.value = url;
+    }
+  } catch (error) {
+    console.error('Failed to load signaling URL:', error);
+  }
+}
+
+async function saveSignalingUrl(url) {
+  try {
+    await chrome.storage.local.set({
+      [SIGNALING_URL_STORAGE_KEY]: url
+    });
+  } catch (error) {
+    console.error('Failed to save signaling URL:', error);
+  }
 }
 
 function setupModeSelector() {
@@ -270,7 +298,13 @@ async function checkSyncStatus() {
   if (syncState.mode === 'remote' && syncState.remote.isActive) {
     switchMode('remote');
     selectedRemoteTab = syncState.remote.localTabId;
-    showRemoteConnected(syncState.remote);
+
+    if (syncState.remote.connectionState === 'connected') {
+      showRemoteConnected(syncState.remote);
+    } else {
+      showRemoteConnecting(syncState.remote.roomId);
+      pollRemoteConnection();
+    }
   }
 }
 
@@ -293,6 +327,20 @@ function setupEventListeners() {
   document.getElementById("createRoom").addEventListener("click", createRoom);
   document.getElementById("joinRoom").addEventListener("click", joinRoom);
   document.getElementById("stopRemoteSync").addEventListener("click", stopRemoteSync);
+
+  const signalingInput = document.getElementById('signalingUrl');
+  signalingInput.addEventListener('change', () => {
+    const value = signalingInput.value.trim();
+    if (value) {
+      saveSignalingUrl(value);
+    }
+  });
+  signalingInput.addEventListener('blur', () => {
+    const value = signalingInput.value.trim();
+    if (value) {
+      saveSignalingUrl(value);
+    }
+  });
   
   // Auto-uppercase room ID input
   document.getElementById("roomIdInput").addEventListener("input", (e) => {
@@ -403,6 +451,8 @@ async function createRoom() {
     return;
   }
 
+  await saveSignalingUrl(signalingUrl);
+
   // Show connecting state
   showRemoteConnecting();
 
@@ -454,6 +504,8 @@ async function joinRoom() {
     return;
   }
 
+  await saveSignalingUrl(signalingUrl);
+
   // Show connecting state
   document.getElementById("connectingRoomId").textContent = roomId;
   showRemoteConnecting();
@@ -489,33 +541,50 @@ async function joinRoom() {
 }
 
 async function pollRemoteConnection() {
-  const maxAttempts = 30; // 30 seconds
-  let attempts = 0;
+  if (remoteConnectionPollInterval) {
+    clearInterval(remoteConnectionPollInterval);
+  }
 
-  const checkConnection = setInterval(async () => {
-    attempts++;
+  remoteConnectionPollInterval = setInterval(async () => {
+    if (document.hidden) {
+      return;
+    }
 
     const syncState = await chrome.runtime.sendMessage({
       type: "GET_SYNC_STATE",
     });
 
     if (syncState.remote.connectionState === 'connected') {
-      clearInterval(checkConnection);
+      clearInterval(remoteConnectionPollInterval);
+      remoteConnectionPollInterval = null;
       showRemoteConnected(syncState.remote);
-    } else if (attempts >= maxAttempts || syncState.remote.connectionState === 'disconnected') {
-      clearInterval(checkConnection);
-      if (syncState.remote.connectionState === 'disconnected') {
-        alert("Connection failed or timed out. Please try again.");
-        hideRemoteConnecting();
-      }
+      return;
+    }
+
+    if (syncState.mode !== 'remote' || !syncState.remote.isActive) {
+      clearInterval(remoteConnectionPollInterval);
+      remoteConnectionPollInterval = null;
+      hideRemoteConnecting();
+      return;
+    }
+
+    if (syncState.remote.connectionState === 'disconnected') {
+      clearInterval(remoteConnectionPollInterval);
+      remoteConnectionPollInterval = null;
+      alert("Connection failed or timed out. Please try again.");
+      hideRemoteConnecting();
     }
   }, 1000);
 }
 
-function showRemoteConnecting() {
+function showRemoteConnecting(roomId = '') {
   document.getElementById("remoteActions").style.display = "none";
   document.getElementById("remoteConnecting").style.display = "block";
   document.getElementById("remoteConnected").style.display = "none";
+
+  if (roomId) {
+    document.getElementById("connectingRoomId").textContent = roomId;
+  }
 }
 
 function hideRemoteConnecting() {
@@ -535,6 +604,11 @@ function showRemoteConnected(remoteState) {
 }
 
 async function stopRemoteSync() {
+  if (remoteConnectionPollInterval) {
+    clearInterval(remoteConnectionPollInterval);
+    remoteConnectionPollInterval = null;
+  }
+
   // Disable sync on tab
   if (selectedRemoteTab) {
     chrome.tabs
@@ -550,3 +624,10 @@ async function stopRemoteSync() {
 }
 
 init();
+
+window.addEventListener('beforeunload', () => {
+  if (remoteConnectionPollInterval) {
+    clearInterval(remoteConnectionPollInterval);
+    remoteConnectionPollInterval = null;
+  }
+});

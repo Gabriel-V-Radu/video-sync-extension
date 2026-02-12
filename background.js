@@ -283,13 +283,18 @@ function handleRemotePlayerAction(senderTabId, action) {
 
   console.log(`[Remote] Player action from local tab ${senderTabId}:`, action);
 
+  const remoteAction = {
+    ...action,
+    timeOffset: action?.timeOffset ?? 0
+  };
+
   // Send action to remote peer via WebRTC offscreen context
   if (remoteSyncState.connectionState === 'connected') {
     chrome.runtime.sendMessage({
       type: 'REMOTE_OFFSCREEN_SEND_SYNC',
       message: {
         type: 'sync-action',
-        action: action,
+        action: remoteAction,
         timestamp: Date.now()
       }
     }).catch((err) => {
