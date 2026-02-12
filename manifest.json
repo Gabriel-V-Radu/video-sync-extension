@@ -3,7 +3,7 @@
   "name": "Video Sync Player",
   "version": "1.0.0",
   "description": "Synchronize video players across YouTube, Crunchyroll, and Netflix",
-  "permissions": ["activeTab", "tabs", "storage"],
+  "permissions": ["activeTab", "tabs", "storage", "offscreen"],
   "host_permissions": [
     "https://www.youtube.com/*",
     "https://www.crunchyroll.com/*",

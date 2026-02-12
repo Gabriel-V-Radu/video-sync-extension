@@ -1,6 +1,3 @@
-// Import WebRTC Manager for remote sync
-importScripts('webrtc-manager.js');
-
 // Sync modes: 'local' or 'remote'
 let syncMode = 'local'; // Default to local sync
 
@@ -19,12 +16,45 @@ let localSyncState = {
 let remoteSyncState = {
   isActive: false,
   localTabId: null, // The tab on this browser
-  webrtc: null, // WebRTCManager instance
   roomId: null,
   isHost: false,
   connectionState: 'disconnected',
   signalingUrl: null
 };
+
+const OFFSCREEN_DOCUMENT_PATH = 'offscreen.html';
+
+async function hasOffscreenDocument() {
+  if (!chrome.runtime.getContexts) {
+    return false;
+  }
+
+  const contexts = await chrome.runtime.getContexts({
+    contextTypes: ['OFFSCREEN_DOCUMENT'],
+    documentUrls: [chrome.runtime.getURL(OFFSCREEN_DOCUMENT_PATH)]
+  });
+
+  return contexts.length > 0;
+}
+
+async function ensureOffscreenDocument() {
+  try {
+    if (await hasOffscreenDocument()) {
+      return;
+    }
+
+    await chrome.offscreen.createDocument({
+      url: OFFSCREEN_DOCUMENT_PATH,
+      reasons: ['WEB_RTC'],
+      justification: 'Keep WebRTC peer connection alive for remote sync'
+    });
+  } catch (error) {
+    const message = error?.message || '';
+    if (!message.includes('Only a single offscreen document')) {
+      throw error;
+    }
+  }
+}
 
 let registeredTabs = new Map(); // tabId -> { site, url, timestamp }
 
@@ -37,10 +67,10 @@ function resetLocalSyncState() {
 }
 
 function resetRemoteSyncState() {
-  if (remoteSyncState.webrtc) {
-    remoteSyncState.webrtc.disconnect();
-    remoteSyncState.webrtc = null;
-  }
+  chrome.runtime.sendMessage({ type: 'REMOTE_OFFSCREEN_STOP' }).catch(() => {
+    // Offscreen document may not exist yet
+  });
+
   remoteSyncState.isActive = false;
   remoteSyncState.localTabId = null;
   remoteSyncState.roomId = null;
@@ -154,6 +184,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ success: true });
       break;
 
+    case 'REMOTE_OFFSCREEN_STATE':
+      remoteSyncState.connectionState = message.state || 'disconnected';
+      sendResponse({ success: true });
+      break;
+
+    case 'REMOTE_OFFSCREEN_PEER_MESSAGE':
+      handleRemoteMessage(message.message);
+      sendResponse({ success: true });
+      break;
+
+    case 'REMOTE_OFFSCREEN_CREATE_ROOM':
+    case 'REMOTE_OFFSCREEN_JOIN_ROOM':
+    case 'REMOTE_OFFSCREEN_SEND_SYNC':
+    case 'REMOTE_OFFSCREEN_STOP':
+      return false;
+
     default:
       sendResponse({ success: false, error: `Unknown message type: ${message.type}` });
       break;
@@ -237,12 +283,17 @@ function handleRemotePlayerAction(senderTabId, action) {
 
   console.log(`[Remote] Player action from local tab ${senderTabId}:`, action);
 
-  // Send action to remote peer via WebRTC
-  if (remoteSyncState.webrtc && remoteSyncState.connectionState === 'connected') {
-    remoteSyncState.webrtc.sendSyncMessage({
-      type: 'sync-action',
-      action: action,
-      timestamp: Date.now()
+  // Send action to remote peer via WebRTC offscreen context
+  if (remoteSyncState.connectionState === 'connected') {
+    chrome.runtime.sendMessage({
+      type: 'REMOTE_OFFSCREEN_SEND_SYNC',
+      message: {
+        type: 'sync-action',
+        action: action,
+        timestamp: Date.now()
+      }
+    }).catch((err) => {
+      console.error('[Remote] Failed to send sync message:', err);
     });
   }
 }
@@ -282,23 +333,21 @@ async function handleRemoteCreateRoom(message, sendResponse) {
     remoteSyncState.signalingUrl = message.signalingUrl;
     remoteSyncState.isHost = true;
 
-    // Create WebRTC manager
-    remoteSyncState.webrtc = new WebRTCManager();
+    await ensureOffscreenDocument();
 
-    // Setup callbacks
-    remoteSyncState.webrtc.onMessage((msg) => {
-      handleRemoteMessage(msg);
+    const result = await chrome.runtime.sendMessage({
+      type: 'REMOTE_OFFSCREEN_CREATE_ROOM',
+      signalingUrl: message.signalingUrl
     });
 
-    remoteSyncState.webrtc.onStateChange((state) => {
-      remoteSyncState.connectionState = state;
-      console.log('[Remote] Connection state:', state);
-    });
+    if (!result?.success) {
+      throw new Error(result?.error || 'Failed to create remote room');
+    }
 
-    // Create room
-    const roomId = await remoteSyncState.webrtc.createRoom(message.signalingUrl);
+    const roomId = result.roomId;
     remoteSyncState.roomId = roomId;
     remoteSyncState.isActive = true;
+    remoteSyncState.connectionState = 'connecting';
 
     sendResponse({ 
       success: true, 
@@ -323,22 +372,20 @@ async function handleRemoteJoinRoom(message, sendResponse) {
     remoteSyncState.signalingUrl = message.signalingUrl;
     remoteSyncState.isHost = false;
 
-    // Create WebRTC manager
-    remoteSyncState.webrtc = new WebRTCManager();
+    await ensureOffscreenDocument();
 
-    // Setup callbacks
-    remoteSyncState.webrtc.onMessage((msg) => {
-      handleRemoteMessage(msg);
+    const result = await chrome.runtime.sendMessage({
+      type: 'REMOTE_OFFSCREEN_JOIN_ROOM',
+      roomId: message.roomId,
+      signalingUrl: message.signalingUrl
     });
 
-    remoteSyncState.webrtc.onStateChange((state) => {
-      remoteSyncState.connectionState = state;
-      console.log('[Remote] Connection state:', state);
-    });
+    if (!result?.success) {
+      throw new Error(result?.error || 'Failed to join remote room');
+    }
 
-    // Join room
-    await remoteSyncState.webrtc.joinRoom(message.roomId, message.signalingUrl);
     remoteSyncState.isActive = true;
+    remoteSyncState.connectionState = 'connecting';
 
     sendResponse({ 
       success: true, 
