@@ -5,6 +5,8 @@ let isPlayerSetup = false;
 let seekDebounceTimer = null;
 let lastKnownTime = 0;
 let syncCheckInterval = null;
+let outboundActionSeq = 0;
+let lastAppliedSyncSeq = 0;
 
 // Helper to check if extension context is still valid
 function isExtensionContextValid() {
@@ -142,9 +144,15 @@ function sendPlayerAction(action) {
     return;
   }
 
+  const actionWithMeta = {
+    ...action,
+    syncSeq: ++outboundActionSeq,
+    sentAt: Date.now()
+  };
+
   chrome.runtime.sendMessage({
     type: 'PLAYER_ACTION',
-    action: action
+    action: actionWithMeta
   }).catch(err => {
     if (!isExtensionContextValid()) {
       console.log('Extension context invalidated, stopping sync');
@@ -173,6 +181,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   } else if (message.type === 'DISABLE_SYNC') {
     isSyncing = false;
     isPrimaryPlayer = false;
+    outboundActionSeq = 0;
+    lastAppliedSyncSeq = 0;
     stopPeriodicSync();
     sendResponse({ success: true });
   } else if (message.type === 'GET_VIDEO_INFO') {
@@ -235,6 +245,8 @@ function handleEnableSync(message, sendResponse) {
 function enableSyncWithPlayer(message) {
   isSyncing = true;
   isPrimaryPlayer = message.isPrimary || false;
+  outboundActionSeq = 0;
+  lastAppliedSyncSeq = 0;
   console.log(`Crunchyroll player enabled as ${isPrimaryPlayer ? 'PRIMARY' : 'SECONDARY'}`);
 
   // Report current time to calculate offset
@@ -259,6 +271,13 @@ function enableSyncWithPlayer(message) {
 
 function handleSyncAction(action) {
   if (!player) return;
+
+  if (typeof action?.syncSeq === 'number') {
+    if (action.syncSeq <= lastAppliedSyncSeq) {
+      return;
+    }
+    lastAppliedSyncSeq = action.syncSeq;
+  }
 
   // Clear any pending seek debounce timer
   clearTimeout(seekDebounceTimer);
